@@ -1,3 +1,9 @@
+/**
+ * WORKFLOW-SAFE MODULE: src/domain is imported by Temporal workflow code and
+ * bundled into the deterministic workflow sandbox. Keep it pure: no I/O, no
+ * Node APIs (node:*), no config/logger/zod/ioredis imports, no Date.now or
+ * Math.random. Type-only imports are fine.
+ */
 import type { BestOffer, SupplierHotel, SupplierName } from './types';
 
 /** Dedupe key: trimmed + lowercased name. */

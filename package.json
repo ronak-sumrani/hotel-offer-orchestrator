@@ -13,6 +13,7 @@
     "start:api": "node dist/api/server.js",
     "start:worker": "node dist/temporal/worker.js",
     "typecheck": "tsc --noEmit",
+    "workflow:run": "tsx scripts/runWorkflow.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
