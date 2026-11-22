@@ -1,10 +1,16 @@
 import { Client, Connection } from '@temporalio/client';
 import { config } from '../config';
 
+const CONNECT_TIMEOUT = '3s';
+
 let clientPromise: Promise<Client> | undefined;
 
 async function connect(): Promise<Client> {
-  const connection = await Connection.connect({ address: config.temporalAddress });
+  // 3s (default 10s) so a request fails fast with 503 when Temporal is down.
+  const connection = await Connection.connect({
+    address: config.temporalAddress,
+    connectTimeout: CONNECT_TIMEOUT,
+  });
   return new Client({ connection, namespace: config.temporalNamespace });
 }
 

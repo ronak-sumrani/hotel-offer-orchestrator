@@ -5,19 +5,12 @@
  */
 import { ApplicationFailure, log, proxyActivities } from '@temporalio/workflow';
 import { selectBestOffers } from '../domain/selectBestOffers';
-import type { BestOffer, SupplierHotel, SupplierName } from '../domain/types';
+import type { SupplierHotel, SupplierName } from '../domain/types';
 import type { HotelActivities } from './activities';
+import { ALL_SUPPLIERS_FAILED, type HotelOffersInput, type HotelOffersResult } from './shared';
 
-export const ALL_SUPPLIERS_FAILED = 'AllSuppliersFailed';
-
-export interface HotelOffersInput {
-  city: string;
-}
-
-export interface HotelOffersResult {
-  offers: BestOffer[];
-  failedSuppliers: SupplierName[];
-}
+export { ALL_SUPPLIERS_FAILED };
+export type { HotelOffersInput, HotelOffersResult };
 
 const { fetchSupplierA, fetchSupplierB } = proxyActivities<HotelActivities>({
   startToCloseTimeout: '5s',

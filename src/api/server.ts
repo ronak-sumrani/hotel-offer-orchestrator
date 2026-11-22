@@ -1,9 +1,11 @@
-import type { Server } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import express, { type Express } from 'express';
 import { config } from '../config';
 import { createLogger } from '../logger';
+import { closeTemporalClient } from '../temporal/client';
 import { errorHandler, notFoundHandler } from './errors';
 import { requestLogger } from './requestLogger';
+import { createHotelsRouter, type HotelsRouterOptions } from './routes/hotels';
 import { createSupplierRouter, type SupplierRouterOptions } from './routes/suppliers';
 
 const log = createLogger('api');
@@ -13,6 +15,8 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 export interface AppOptions {
   /** Overrides for the mock supplier routes (tests use this to disable the delay). */
   suppliers?: Partial<SupplierRouterOptions>;
+  /** Overrides for /api/hotels (tests inject a fake workflow runner). */
+  hotels?: Partial<HotelsRouterOptions>;
 }
 
 /** Builds the Express app without listening (used directly by supertest). */
@@ -24,6 +28,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(express.json());
 
   app.use(createSupplierRouter(options.suppliers));
+  app.use(createHotelsRouter(options.hotels));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
@@ -33,14 +38,26 @@ export function createApp(options: AppOptions = {}): Express {
 /** Starts the HTTP server and installs graceful-shutdown handlers. */
 export function start(): Server {
   const app = createApp();
-  const server = app.listen(config.port, () => {
+  // Not app.listen(port, cb): Express 5 also registers cb as the 'error'
+  // listener, so it would log "API listening" even when listen fails.
+  const server = createServer(app);
+
+  server.once('listening', () => {
     log.info({ port: config.port }, 'API listening');
   });
 
-  server.on('error', (err) => {
-    log.fatal({ err }, 'API server failed');
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      log.fatal({ port: config.port }, `port ${config.port} already in use`);
+    } else if (err.code === 'EACCES') {
+      log.fatal({ port: config.port }, `permission denied to listen on port ${config.port}`);
+    } else {
+      log.fatal({ err }, 'API server failed');
+    }
     process.exit(1);
   });
+
+  server.listen(config.port);
 
   let shuttingDown = false;
   const shutdown = (signal: NodeJS.Signals): void => {
@@ -48,19 +65,21 @@ export function start(): Server {
     shuttingDown = true;
     log.info({ signal }, 'shutting down');
 
-    server.close((err) => {
-      if (err) {
-        log.error({ err }, 'error during shutdown');
-        process.exit(1);
-      }
-      log.info('shutdown complete');
-      process.exit(0);
-    });
-
     setTimeout(() => {
       log.error('shutdown timed out, forcing exit');
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS).unref();
+
+    server.close((closeErr) => {
+      if (closeErr) log.error({ err: closeErr }, 'error closing HTTP server');
+      log.info('closing Temporal client');
+      closeTemporalClient()
+        .catch((err: unknown) => log.error({ err }, 'error closing Temporal client'))
+        .finally(() => {
+          log.info('shutdown complete');
+          process.exit(closeErr ? 1 : 0);
+        });
+    });
   };
 
   process.on('SIGINT', shutdown);
