@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { LogLevel as TemporalLogLevel, LogMetadata, Logger as TemporalLogger } from '@temporalio/common';
-import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
+import { NativeConnection, Runtime, Worker, type WorkerOptions } from '@temporalio/worker';
 import { config } from '../config';
 import { createLogger, installProcessSafetyNet, type Logger } from '../logger';
 import { closeWorkerRedis, getWorkerRedis } from '../redis/client';
@@ -7,6 +9,27 @@ import { createHotelRepository } from '../redis/hotelRepository';
 import { createActivities } from './activities';
 
 const log = createLogger('worker');
+
+/** Must match WORKFLOW_BUNDLE_FILENAME in bundleWorkflows.ts (not imported: that module pulls in the bundler). */
+const WORKFLOW_BUNDLE_FILENAME = 'workflow-bundle.js';
+
+type WorkflowSource =
+  | { kind: 'bundle'; options: Pick<WorkerOptions, 'workflowBundle'>; location: string }
+  | { kind: 'path'; options: Pick<WorkerOptions, 'workflowsPath'>; location: string };
+
+/**
+ * Compiled run (node dist/...): `npm run build` writes the pre-built bundle next to
+ * this file, so the worker skips webpack at startup. Dev (tsx, __dirname = src/temporal):
+ * no bundle there, so fall back to workflowsPath and bundle on the fly.
+ */
+function resolveWorkflowSource(): WorkflowSource {
+  const bundlePath = path.join(__dirname, WORKFLOW_BUNDLE_FILENAME);
+  if (existsSync(bundlePath)) {
+    return { kind: 'bundle', options: { workflowBundle: { codePath: bundlePath } }, location: bundlePath };
+  }
+  const workflowsPath = require.resolve('./workflows');
+  return { kind: 'path', options: { workflowsPath }, location: workflowsPath };
+}
 
 /** Routes Temporal SDK + activity-context logs through pino. */
 function pinoTemporalLogger(pino: Logger): TemporalLogger {
@@ -43,12 +66,18 @@ export async function runWorker(): Promise<void> {
 
   let connection: NativeConnection | undefined;
   try {
+    const workflowSource = resolveWorkflowSource();
+    log.info(
+      { workflowSource: workflowSource.kind, location: workflowSource.location },
+      'loading workflow code',
+    );
+
     connection = await NativeConnection.connect({ address: config.temporalAddress });
     const worker = await Worker.create({
       connection,
       namespace: config.temporalNamespace,
       taskQueue: config.temporalTaskQueue,
-      workflowsPath: require.resolve('./workflows'),
+      ...workflowSource.options,
       activities: createActivities({
         supplierBaseUrl: config.supplierBaseUrl,
         hotelStore: createHotelRepository({
@@ -67,6 +96,7 @@ export async function runWorker(): Promise<void> {
         namespace: config.temporalNamespace,
         taskQueue: config.temporalTaskQueue,
         supplierBaseUrl: config.supplierBaseUrl,
+        workflowSource: workflowSource.kind,
       },
       'worker started',
     );
