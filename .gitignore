@@ -1,14 +1,11 @@
-push-both.sh
-CLAUDE.md
-.claude
-
 # dependencies / build output
 node_modules/
 dist/
 coverage/
 
 # local env
-.env
+.env.*
+!.env.example
 
 # logs
 *.log
