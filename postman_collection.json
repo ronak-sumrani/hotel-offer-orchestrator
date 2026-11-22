@@ -1,0 +1,1576 @@
+{
+  "info": {
+    "name": "Hotel Offer Orchestrator",
+    "description": "Requests and tests for the Hotel Offer Orchestrator API.\n\nPrerequisite: the stack is running with the default env (no SUPPLIER_*_DOWN flags), e.g. `docker compose up -d --build`.\n\nRun from the CLI: `npx --yes newman run postman_collection.json`.\nFolders 1–6 run against any cache state. Folder 7 is skipped unless the variable `supplierDownMode` is `A` (see its description).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "supplierDownMode",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('[common] X-Request-Id header present', () => pm.expect(pm.response.headers.has('X-Request-Id')).to.equal(true));",
+          "pm.test('[common] Content-Type is JSON', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Hotels – happy path",
+      "description": "Merged, deduped, sorted results. The first request per city may be MISS or HIT depending on prior cache state; the repeat must be HIT.",
+      "item": [
+        {
+          "name": "Delhi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('5 hotels in exact order', () => pm.expect(names(body)).to.eql([\"Lemon Tree\",\"Holtin\",\"Radison\",\"ITC Maurya\",\"Taj Palace\"]));",
+                  "expectSorted(body);",
+                  "pm.test('Holtin from Supplier B at 5340 (B cheaper)', () => {",
+                  "  pm.expect(byName(body, 'Holtin')).to.eql({ name: 'Holtin', price: 5340, supplier: 'Supplier B', commissionPct: 20 });",
+                  "});",
+                  "pm.test('Radison from Supplier A at 5900 (A cheaper, clean name)', () => {",
+                  "  pm.expect(byName(body, 'Radison')).to.eql({ name: 'Radison', price: 5900, supplier: 'Supplier A', commissionPct: 13 });",
+                  "});",
+                  "pm.collectionVariables.set('delhiBody', JSON.stringify(body));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delhi again (cache HIT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCache('HIT');",
+                  "expectNoFailedSuppliers();",
+                  "pm.test('body equals the first Delhi response', () => pm.expect(body).to.eql(JSON.parse(pm.collectionVariables.get('delhiBody'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "City normalization (\"  DeLhI \")",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCache('HIT');",
+                  "pm.test('body equals the Delhi response (same cache key)', () => pm.expect(body).to.eql(JSON.parse(pm.collectionVariables.get('delhiBody'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=%20%20DeLhI%20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "%20%20DeLhI%20"
+                }
+              ]
+            },
+            "description": "City is trimmed and lowercased, so this hits the same `hotels:delhi` cache entry."
+          },
+          "response": []
+        },
+        {
+          "name": "Mumbai (price tie → Supplier A)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('4 hotels in exact order', () => pm.expect(names(body)).to.eql([\"Sea Princess\",\"Marine Plaza\",\"Trident\",\"The Oberoi\"]));",
+                  "expectSorted(body);",
+                  "pm.test('Trident tie (7000 both) kept from Supplier A', () => {",
+                  "  pm.expect(byName(body, 'Trident')).to.eql({ name: 'Trident', price: 7000, supplier: 'Supplier A', commissionPct: 12 });",
+                  "});",
+                  "pm.test('The Oberoi from Supplier B, spelled \"The Oberoi\"', () => {",
+                  "  pm.expect(byName(body, 'The Oberoi')).to.include({ price: 11500, supplier: 'Supplier B' });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=mumbai",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "mumbai"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Hotels – price filter",
+      "description": "Filtering happens in Redis (ZRANGEBYSCORE). Bounds are inclusive.",
+      "item": [
+        {
+          "name": "5000–6000",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('names are exactly [\"Holtin\",\"Radison\"]', () => pm.expect(names(body)).to.eql([\"Holtin\",\"Radison\"]));",
+                  "pm.test('every price within [5000, 6000] (inclusive)', () => {",
+                  "  body.forEach((h) => {",
+                  "    pm.expect(h.price).to.be.at.least(5000);",
+                  "    pm.expect(h.price).to.be.at.most(6000);",
+                  "  });",
+                  "});",
+                  "",
+                  "pm.test('Holtin is B/5340, Radison is A/5900', () => {",
+                  "  pm.expect(byName(body, 'Holtin')).to.include({ price: 5340, supplier: 'Supplier B' });",
+                  "  pm.expect(byName(body, 'Radison')).to.include({ price: 5900, supplier: 'Supplier A' });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5000&maxPrice=6000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "5000"
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "6000"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Only minPrice (9000)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('names are exactly [\"Taj Palace\"]', () => pm.expect(names(body)).to.eql([\"Taj Palace\"]));",
+                  "pm.test('every price within [9000, +inf] (inclusive)', () => {",
+                  "  body.forEach((h) => {",
+                  "    pm.expect(h.price).to.be.at.least(9000);",
+                  "    ",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=9000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "9000"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Only maxPrice (5000)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('names are exactly [\"Lemon Tree\"]', () => pm.expect(names(body)).to.eql([\"Lemon Tree\"]));",
+                  "pm.test('every price within [-inf, 5000] (inclusive)', () => {",
+                  "  body.forEach((h) => {",
+                  "    ",
+                  "    pm.expect(h.price).to.be.at.most(5000);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&maxPrice=5000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "5000"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Inclusive bounds (5340–8800)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('names are exactly [\"Holtin\",\"Radison\",\"ITC Maurya\"]', () => pm.expect(names(body)).to.eql([\"Holtin\",\"Radison\",\"ITC Maurya\"]));",
+                  "pm.test('every price within [5340, 8800] (inclusive)', () => {",
+                  "  body.forEach((h) => {",
+                  "    pm.expect(h.price).to.be.at.least(5340);",
+                  "    pm.expect(h.price).to.be.at.most(8800);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=5340&maxPrice=8800",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "5340"
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "8800"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "No match (minPrice 100000)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCacheMissOrHit();",
+                  "expectNoFailedSuppliers();",
+                  "expectItemShape(body);",
+                  "pm.test('names are exactly []', () => pm.expect(names(body)).to.eql([]));",
+                  "pm.test('every price within [100000, +inf] (inclusive)', () => {",
+                  "  body.forEach((h) => {",
+                  "    pm.expect(h.price).to.be.at.least(100000);",
+                  "    ",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=100000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "100000"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Hotels – no results",
+      "description": "Unknown city returns 200 []. Empty results are never cached, so this is always MISS.",
+      "item": [
+        {
+          "name": "Goa (unknown city)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "pm.test('body is []', () => pm.expect(body).to.eql([]));",
+                  "expectCache('MISS');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=goa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "goa"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Hotels – validation",
+      "description": "Invalid queries return 400 { error: { code: \"INVALID_QUERY\", message } }.",
+      "item": [
+        {
+          "name": "Missing city",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error body is { error: { code, message } }', () => {",
+                  "  pm.expect(Object.keys(body)).to.eql(['error']);",
+                  "  pm.expect(Object.keys(body.error).sort()).to.eql(['code', 'message']);",
+                  "});",
+                  "pm.test('code is INVALID_QUERY', () => pm.expect(body.error.code).to.equal('INVALID_QUERY'));",
+                  "pm.test(\"message contains \\\"city: is required\\\"\", () => pm.expect(body.error.message).to.include(\"city: is required\"));",
+                  "pm.test('no X-Cache header', () => pm.expect(pm.response.headers.has('X-Cache')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Empty city",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error body is { error: { code, message } }', () => {",
+                  "  pm.expect(Object.keys(body)).to.eql(['error']);",
+                  "  pm.expect(Object.keys(body.error).sort()).to.eql(['code', 'message']);",
+                  "});",
+                  "pm.test('code is INVALID_QUERY', () => pm.expect(body.error.code).to.equal('INVALID_QUERY'));",
+                  "pm.test(\"message contains \\\"city: must not be empty\\\"\", () => pm.expect(body.error.message).to.include(\"city: must not be empty\"));",
+                  "pm.test('no X-Cache header', () => pm.expect(pm.response.headers.has('X-Cache')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Non-numeric minPrice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error body is { error: { code, message } }', () => {",
+                  "  pm.expect(Object.keys(body)).to.eql(['error']);",
+                  "  pm.expect(Object.keys(body.error).sort()).to.eql(['code', 'message']);",
+                  "});",
+                  "pm.test('code is INVALID_QUERY', () => pm.expect(body.error.code).to.equal('INVALID_QUERY'));",
+                  "pm.test(\"message contains \\\"minPrice: must be a number\\\"\", () => pm.expect(body.error.message).to.include(\"minPrice: must be a number\"));",
+                  "pm.test('no X-Cache header', () => pm.expect(pm.response.headers.has('X-Cache')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "abc"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Negative minPrice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error body is { error: { code, message } }', () => {",
+                  "  pm.expect(Object.keys(body)).to.eql(['error']);",
+                  "  pm.expect(Object.keys(body.error).sort()).to.eql(['code', 'message']);",
+                  "});",
+                  "pm.test('code is INVALID_QUERY', () => pm.expect(body.error.code).to.equal('INVALID_QUERY'));",
+                  "pm.test(\"message contains \\\"minPrice: must be >= 0\\\"\", () => pm.expect(body.error.message).to.include(\"minPrice: must be >= 0\"));",
+                  "pm.test('no X-Cache header', () => pm.expect(pm.response.headers.has('X-Cache')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "-1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "minPrice > maxPrice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error body is { error: { code, message } }', () => {",
+                  "  pm.expect(Object.keys(body)).to.eql(['error']);",
+                  "  pm.expect(Object.keys(body.error).sort()).to.eql(['code', 'message']);",
+                  "});",
+                  "pm.test('code is INVALID_QUERY', () => pm.expect(body.error.code).to.equal('INVALID_QUERY'));",
+                  "pm.test(\"message contains \\\"minPrice: must be <= maxPrice\\\"\", () => pm.expect(body.error.message).to.include(\"minPrice: must be <= maxPrice\"));",
+                  "pm.test('no X-Cache header', () => pm.expect(pm.response.headers.has('X-Cache')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=7000&maxPrice=5000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "7000"
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "5000"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Repeated city",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error body is { error: { code, message } }', () => {",
+                  "  pm.expect(Object.keys(body)).to.eql(['error']);",
+                  "  pm.expect(Object.keys(body.error).sort()).to.eql(['code', 'message']);",
+                  "});",
+                  "pm.test('code is INVALID_QUERY', () => pm.expect(body.error.code).to.equal('INVALID_QUERY'));",
+                  "pm.test(\"message contains \\\"city: must be a single value\\\"\", () => pm.expect(body.error.message).to.include(\"city: must be a single value\"));",
+                  "pm.test('no X-Cache header', () => pm.expect(pm.response.headers.has('X-Cache')).to.equal(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&city=mumbai",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "city",
+                  "value": "mumbai"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Suppliers",
+      "description": "Mock supplier endpoints (raw supplier data). These fail if SUPPLIER_A_DOWN / SUPPLIER_B_DOWN is set on the API.",
+      "item": [
+        {
+          "name": "Supplier A (delhi)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test('every item has exactly hotelId/name/price/city/commissionPct', () => {",
+                  "  pm.expect(body).to.be.an('array');",
+                  "  body.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['city', 'commissionPct', 'hotelId', 'name', 'price']);",
+                  "    pm.expect(h.hotelId).to.be.a('string');",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.city).to.be.a('string');",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "pm.test('every city is delhi', () => body.forEach((h) => pm.expect(h.city).to.equal('delhi')));",
+                  "",
+                  "pm.test('hotelIds are a1–a4', () => pm.expect(body.map((h) => h.hotelId)).to.eql(['a1', 'a2', 'a3', 'a4']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/supplierA/hotels?city=delhi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "supplierA",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supplier B (delhi)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test('every item has exactly hotelId/name/price/city/commissionPct', () => {",
+                  "  pm.expect(body).to.be.an('array');",
+                  "  body.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['city', 'commissionPct', 'hotelId', 'name', 'price']);",
+                  "    pm.expect(h.hotelId).to.be.a('string');",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.city).to.be.a('string');",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "pm.test('every city is delhi', () => body.forEach((h) => pm.expect(h.city).to.equal('delhi')));",
+                  "",
+                  "pm.test('hotelIds are b1–b3', () => pm.expect(body.map((h) => h.hotelId)).to.eql(['b1', 'b2', 'b3']));",
+                  "pm.test('b2 name is raw \"  RADISON \" (the API cleans it)', () => pm.expect(body.find((h) => h.hotelId === 'b2').name).to.equal('  RADISON '));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/supplierB/hotels?city=delhi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "supplierB",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supplier A simulated down (?fail=true)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 500', () => pm.response.to.have.status(500));",
+                  "const body = pm.response.json();",
+                  "pm.test('code is SUPPLIER_UNAVAILABLE', () => pm.expect(body.error.code).to.equal('SUPPLIER_UNAVAILABLE'));",
+                  "pm.test('message', () => pm.expect(body.error.message).to.equal('Supplier A is unavailable (simulated)'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/supplierA/hotels?city=delhi&fail=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "supplierA",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "fail",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Health",
+      "description": "Dependency report and liveness probe.",
+      "item": [
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('status is ok | degraded | down', () => pm.expect(body.status).to.be.oneOf(['ok', 'degraded', 'down']));",
+                  "pm.test('HTTP 503 iff down, else 200', () => pm.response.to.have.status(body.status === 'down' ? 503 : 200));",
+                  "pm.test('all five checks present', () => {",
+                  "  pm.expect(Object.keys(body.checks).sort()).to.eql(['redis', 'supplierA', 'supplierB', 'temporal', 'worker']);",
+                  "});",
+                  "pm.test('each check has status, latencyMs and error only when down', () => {",
+                  "  Object.values(body.checks).forEach((c) => {",
+                  "    pm.expect(c.status).to.be.oneOf(['up', 'down']);",
+                  "    pm.expect(c.latencyMs).to.be.a('number').and.at.least(0);",
+                  "    if (c.status === 'down') pm.expect(c.error).to.be.a('string');",
+                  "    else pm.expect(c).to.not.have.property('error');",
+                  "  });",
+                  "});",
+                  "pm.test('timestamp is ISO 8601', () => pm.expect(new Date(body.timestamp).toISOString()).to.equal(body.timestamp));",
+                  "pm.test('Cache-Control: no-store', () => pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'));",
+                  "(body.status === 'ok' ? pm.test : pm.test.skip)('all checks up (status ok)', () => {",
+                  "  Object.values(body.checks).forEach((c) => pm.expect(c.status).to.equal('up'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Liveness",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('body is { status: \"ok\" }', () => pm.expect(pm.response.json()).to.eql({ status: 'ok' }));",
+                  "pm.test('Cache-Control: no-store', () => pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Supplier down (manual)",
+      "description": "End-to-end check of the one-supplier-down path. Its tests are **skipped** unless the variable `supplierDownMode` is `A`, so a normal collection run stays green.\n\n### Setup\n1. Restart the API with Supplier A down (the flag lives on the API container/process, not the worker):\n   - Bash, docker compose: `SUPPLIER_A_DOWN=true docker compose up -d api`\n   - PowerShell, docker compose: `$env:SUPPLIER_A_DOWN='true'; docker compose up -d api`\n   - Bash, local: `SUPPLIER_A_DOWN=true npm run start:api`\n   - PowerShell, local: `$env:SUPPLIER_A_DOWN='true'; npm run start:api`\n2. Clear the cache:\n   - docker compose: `docker compose exec redis redis-cli FLUSHALL`\n   - local: `redis-cli FLUSHALL`\n3. Enable the tests: set the collection variable `supplierDownMode` to `A`, or with newman:\n   `npx --yes newman run postman_collection.json --folder \"7. Supplier down (manual)\" --env-var supplierDownMode=A`\n\n### Teardown\n1. Restart the API without the flag:\n   - Bash, docker compose: `docker compose up -d api` (SUPPLIER_A_DOWN defaults to false, so the container is recreated)\n   - PowerShell, docker compose: `Remove-Item Env:SUPPLIER_A_DOWN; docker compose up -d api`\n   - Local: stop the API and start it again without the variable (PowerShell: `Remove-Item Env:SUPPLIER_A_DOWN` first)\n2. Clear the cache again (`docker compose exec redis redis-cli FLUSHALL` or `redis-cli FLUSHALL`). Otherwise the partial results stay cached for 30s and folder 1 fails on X-Failed-Suppliers.\n3. Clear `supplierDownMode` (empty) if you set it in Postman.",
+      "item": [
+        {
+          "name": "Delhi with Supplier A down",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.get('supplierDownMode') !== 'A') {",
+                  "  pm.test.skip('requires supplierDownMode=A (see folder description)', () => {});",
+                  "  return;",
+                  "}",
+                  "",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCache('MISS');",
+                  "pm.test('X-Failed-Suppliers is \"Supplier A\"', () => pm.expect(pm.response.headers.get('X-Failed-Suppliers')).to.equal('Supplier A'));",
+                  "expectItemShape(body);",
+                  "pm.test('only Supplier B hotels', () => body.forEach((h) => pm.expect(h.supplier).to.equal('Supplier B')));",
+                  "pm.test('names and prices', () => {",
+                  "  pm.expect(names(body)).to.eql(['Holtin', 'RADISON', 'ITC Maurya']);",
+                  "  pm.expect(body.map((h) => h.price)).to.eql([5340, 6100, 8800]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delhi again (HIT keeps X-Failed-Suppliers)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.get('supplierDownMode') !== 'A') {",
+                  "  pm.test.skip('requires supplierDownMode=A (see folder description)', () => {});",
+                  "  return;",
+                  "}",
+                  "",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCache('HIT');",
+                  "pm.test('X-Failed-Suppliers is \"Supplier A\"', () => pm.expect(pm.response.headers.get('X-Failed-Suppliers')).to.equal('Supplier A'));",
+                  "pm.test('names', () => pm.expect(names(body)).to.eql(['Holtin', 'RADISON', 'ITC Maurya']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delhi filtered 6000–9000",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.get('supplierDownMode') !== 'A') {",
+                  "  pm.test.skip('requires supplierDownMode=A (see folder description)', () => {});",
+                  "  return;",
+                  "}",
+                  "",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "const names = (b) => b.map((h) => h.name);",
+                  "const byName = (b, n) => b.find((h) => h.name === n);",
+                  "const expectItemShape = (b) => pm.test('every item has exactly name/price/supplier/commissionPct', () => {",
+                  "  pm.expect(b).to.be.an('array');",
+                  "  b.forEach((h) => {",
+                  "    pm.expect(Object.keys(h).sort()).to.eql(['commissionPct', 'name', 'price', 'supplier']);",
+                  "    pm.expect(h.name).to.be.a('string');",
+                  "    pm.expect(h.price).to.be.a('number');",
+                  "    pm.expect(h.supplier).to.be.oneOf(['Supplier A', 'Supplier B']);",
+                  "    pm.expect(h.commissionPct).to.be.a('number');",
+                  "  });",
+                  "});",
+                  "const expectSorted = (b) => pm.test('sorted by price ascending', () => {",
+                  "  for (let i = 1; i < b.length; i++) pm.expect(b[i].price).to.be.at.least(b[i - 1].price);",
+                  "});",
+                  "const expectNoFailedSuppliers = () => pm.test('no X-Failed-Suppliers header', () => {",
+                  "  pm.expect(pm.response.headers.has('X-Failed-Suppliers')).to.equal(false);",
+                  "});",
+                  "const expectCacheMissOrHit = () => pm.test('X-Cache is MISS or HIT (not BYPASS)', () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.be.oneOf(['MISS', 'HIT']);",
+                  "});",
+                  "const expectCache = (v) => pm.test('X-Cache is ' + v, () => {",
+                  "  pm.expect(pm.response.headers.get('X-Cache')).to.equal(v);",
+                  "});",
+                  "",
+                  "",
+                  "expectCache('HIT');",
+                  "pm.test('X-Failed-Suppliers is \"Supplier A\"', () => pm.expect(pm.response.headers.get('X-Failed-Suppliers')).to.equal('Supplier A'));",
+                  "pm.test('names', () => pm.expect(names(body)).to.eql(['RADISON', 'ITC Maurya']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/hotels?city=delhi&minPrice=6000&maxPrice=9000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hotels"
+              ],
+              "query": [
+                {
+                  "key": "city",
+                  "value": "delhi"
+                },
+                {
+                  "key": "minPrice",
+                  "value": "6000"
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "9000"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Health is degraded",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.get('supplierDownMode') !== 'A') {",
+                  "  pm.test.skip('requires supplierDownMode=A (see folder description)', () => {});",
+                  "  return;",
+                  "}",
+                  "",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status is degraded', () => pm.expect(body.status).to.equal('degraded'));",
+                  "pm.test('supplierA down with HTTP 500', () => pm.expect(body.checks.supplierA).to.include({ status: 'down', error: 'HTTP 500' }));",
+                  "pm.test('supplierB up', () => pm.expect(body.checks.supplierB.status).to.equal('up'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
