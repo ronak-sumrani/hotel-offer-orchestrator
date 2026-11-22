@@ -58,6 +58,8 @@ export function createActivities(deps: ActivityDeps) {
       });
       status = res.status;
       if (!res.ok) {
+        // Release the unread body so the socket returns to the pool now, not at GC.
+        await res.body?.cancel().catch(() => {});
         // Plain Error → retryable per the activity retry policy.
         throw new Error(`${supplier} responded with HTTP ${res.status}`);
       }

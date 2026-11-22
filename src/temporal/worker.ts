@@ -1,7 +1,7 @@
 import type { LogLevel as TemporalLogLevel, LogMetadata, Logger as TemporalLogger } from '@temporalio/common';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { config } from '../config';
-import { createLogger, type Logger } from '../logger';
+import { createLogger, installProcessSafetyNet, type Logger } from '../logger';
 import { closeWorkerRedis, getWorkerRedis } from '../redis/client';
 import { createHotelRepository } from '../redis/hotelRepository';
 import { createActivities } from './activities';
@@ -73,14 +73,20 @@ export async function runWorker(): Promise<void> {
     await worker.run();
     log.info('worker stopped');
   } finally {
+    // Cleanup errors are logged, never thrown, so they cannot mask the original error.
     log.info('closing Redis client');
-    await closeWorkerRedis().catch((err: unknown) => log.error({ err }, 'error closing Redis client'));
-    log.info('Redis client closed');
-    await connection?.close();
+    await closeWorkerRedis().then(
+      () => log.info('Redis client closed'),
+      (err: unknown) => log.error({ err }, 'error closing Redis client'),
+    );
+    await connection
+      ?.close()
+      .catch((err: unknown) => log.error({ err }, 'error closing Temporal connection'));
   }
 }
 
 if (require.main === module) {
+  installProcessSafetyNet(log);
   runWorker().catch((err: unknown) => {
     log.fatal({ err }, 'worker failed');
     process.exitCode = 1;

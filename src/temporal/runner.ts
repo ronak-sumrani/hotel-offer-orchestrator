@@ -23,6 +23,8 @@ import type { hotelOffersWorkflow } from './workflows';
 const WORKFLOW_EXECUTION_TIMEOUT = '30s';
 /** Max time to get the workflow started (incl. SDK gRPC retries) before reporting Temporal down. */
 const START_DEADLINE_MS = 3_000;
+/** Hard cap on waiting for the result: execution timeout (30s) + 5s slack. */
+const RESULT_DEADLINE_MS = 35_000;
 
 /** gRPC status codes that mean "Temporal is not reachable right now". */
 const GRPC_UNAVAILABLE = 14;
@@ -104,9 +106,11 @@ export function createTemporalRunner(
     try {
       // start + result instead of execute(): an already-connected client retries
       // UNAVAILABLE for ~20s by default, so bound the start RPC with a deadline
-      // to fail fast when Temporal goes away. result() is not bounded here; the
-      // 30s workflowExecutionTimeout caps it.
-      const handle = await client.withDeadline(Date.now() + START_DEADLINE_MS, () =>
+      // to fail fast when Temporal goes away. result() normally ends within the
+      // 30s workflowExecutionTimeout, but if Temporal dies while we wait the
+      // SDK's gRPC retries could keep it open longer, so it gets a deadline too.
+      const startedAt = Date.now();
+      const handle = await client.withDeadline(startedAt + START_DEADLINE_MS, () =>
         client.workflow.start<typeof hotelOffersWorkflow>(HOTEL_OFFERS_WORKFLOW, {
           taskQueue: config.temporalTaskQueue,
           workflowId,
@@ -114,7 +118,7 @@ export function createTemporalRunner(
           workflowExecutionTimeout: WORKFLOW_EXECUTION_TIMEOUT,
         }),
       );
-      return await handle.result();
+      return await client.withDeadline(startedAt + RESULT_DEADLINE_MS, () => handle.result());
     } catch (err) {
       throw classifyTemporalError(err);
     }

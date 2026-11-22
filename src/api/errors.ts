@@ -40,16 +40,6 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, next)
     return;
   }
 
-  // Malformed JSON body from express.json()
-  if (isBodyParserError(err) && err.type === 'entity.parse.failed') {
-    res.status(400).json(body('INVALID_JSON', 'Request body is not valid JSON'));
-    return;
-  }
-
   log.error({ err }, 'unhandled error');
   res.status(500).json(body('INTERNAL_ERROR', 'Internal server error'));
 };
-
-function isBodyParserError(err: unknown): err is { type: string } {
-  return typeof err === 'object' && err !== null && typeof (err as { type?: unknown }).type === 'string';
-}

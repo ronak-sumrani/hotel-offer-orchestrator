@@ -134,7 +134,14 @@ export function createHotelsRouter(options: Partial<HotelsRouterOptions> = {}): 
       res.setHeader('X-Cache', cacheStatus);
       if (failedSuppliers.length > 0) res.setHeader('X-Failed-Suppliers', failedSuppliers.join(','));
       log.info(
-        { cache: cacheStatus, count: offers.length, failedSuppliers, durationMs: elapsed() },
+        {
+          cache: cacheStatus,
+          // A HIT runs no workflow, so there is no workflowId to correlate.
+          workflowId: cacheStatus === 'HIT' ? undefined : workflowId,
+          count: offers.length,
+          failedSuppliers,
+          durationMs: elapsed(),
+        },
         'hotel search completed',
       );
       res.json(offers.map(toResponseItem));
@@ -171,6 +178,9 @@ export function createHotelsRouter(options: Partial<HotelsRouterOptions> = {}): 
       const mapped = toHttpError(err);
       if (mapped instanceof AppError) {
         log.warn({ err, workflowId, code: mapped.code, durationMs: elapsed() }, 'hotel search failed');
+      } else {
+        // Unexpected (e.g. workflow terminated/cancelled, namespace not found) → 500.
+        log.error({ err, workflowId, durationMs: elapsed() }, 'hotel search failed unexpectedly');
       }
       throw mapped;
     }

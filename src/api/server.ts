@@ -1,11 +1,12 @@
 import { createServer, type Server } from 'node:http';
 import express, { type Express } from 'express';
 import { config } from '../config';
-import { createLogger } from '../logger';
+import { createLogger, installProcessSafetyNet } from '../logger';
 import { closeApiRedis, getApiRedis } from '../redis/client';
 import { closeTemporalClient } from '../temporal/client';
 import { errorHandler, notFoundHandler } from './errors';
 import { requestLogger } from './requestLogger';
+import { createHealthRouter, type HealthRouterOptions } from './routes/health';
 import { createHotelsRouter, type HotelsRouterOptions } from './routes/hotels';
 import { createSupplierRouter, type SupplierRouterOptions } from './routes/suppliers';
 
@@ -18,16 +19,21 @@ export interface AppOptions {
   suppliers?: Partial<SupplierRouterOptions>;
   /** Overrides for /api/hotels (tests inject a fake workflow runner and cache). */
   hotels?: Partial<HotelsRouterOptions>;
+  /** Overrides for /health (tests inject fake checks and a short timeout). */
+  health?: Partial<HealthRouterOptions>;
 }
 
-/** Builds the Express app without listening (used directly by supertest). */
+/**
+ * Builds the Express app without listening (used directly by supertest).
+ * GET-only API: no body parser is installed.
+ */
 export function createApp(options: AppOptions = {}): Express {
   const app = express();
   app.disable('x-powered-by');
 
   app.use(requestLogger(log));
-  app.use(express.json());
 
+  app.use(createHealthRouter(options.health));
   app.use(createSupplierRouter(options.suppliers));
   app.use(createHotelsRouter(options.hotels));
 
@@ -96,5 +102,6 @@ export function start(): Server {
 }
 
 if (require.main === module) {
+  installProcessSafetyNet(log);
   start();
 }
