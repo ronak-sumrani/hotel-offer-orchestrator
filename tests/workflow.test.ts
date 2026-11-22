@@ -20,6 +20,9 @@ const B: SupplierHotel[] = [
   { hotelId: 'b2', name: 'ITC Maurya', price: 8800, city: 'delhi', commissionPct: 15 },
 ];
 
+/** saveToRedis stand-in that succeeds. */
+const saved = async (): Promise<void> => {};
+
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -56,19 +59,22 @@ async function run(activities: HotelActivities): Promise<HotelOffersResult> {
 }
 
 describe('hotelOffersWorkflow', () => {
-  it('both suppliers succeed → merged, deduped, sorted; no failures', async () => {
+  it('both suppliers succeed → merged, deduped, sorted, saved; no failures', async () => {
+    const saves: unknown[][] = [];
     const result = await run({
       fetchSupplierA: async () => A,
       fetchSupplierB: async () => B,
+      saveToRedis: async (...args) => {
+        saves.push(args);
+      },
     });
-    expect(result).toEqual({
-      offers: [
-        { name: 'Lemon Tree', price: 3200, supplier: 'Supplier A', commissionPct: 8 },
-        { name: 'holtin', price: 5340, supplier: 'Supplier B', commissionPct: 20 },
-        { name: 'ITC Maurya', price: 8800, supplier: 'Supplier B', commissionPct: 15 },
-      ],
-      failedSuppliers: [],
-    });
+    const offers = [
+      { name: 'Lemon Tree', price: 3200, supplier: 'Supplier A', commissionPct: 8 },
+      { name: 'holtin', price: 5340, supplier: 'Supplier B', commissionPct: 20 },
+      { name: 'ITC Maurya', price: 8800, supplier: 'Supplier B', commissionPct: 15 },
+    ];
+    expect(result).toEqual({ offers, failedSuppliers: [], cached: true });
+    expect(saves).toEqual([['delhi', offers, []]]);
   }, 60_000);
 
   it('Supplier A fails after 3 attempts → only B offers, failedSuppliers ["Supplier A"]', async () => {
@@ -79,6 +85,7 @@ describe('hotelOffersWorkflow', () => {
         throw new Error('Supplier A responded with HTTP 500');
       },
       fetchSupplierB: async () => B,
+      saveToRedis: saved,
     });
     expect(attemptsA).toBe(3);
     expect(result).toEqual({
@@ -87,6 +94,7 @@ describe('hotelOffersWorkflow', () => {
         { name: 'ITC Maurya', price: 8800, supplier: 'Supplier B', commissionPct: 15 },
       ],
       failedSuppliers: ['Supplier A'],
+      cached: true,
     });
   }, 60_000);
 
@@ -94,11 +102,41 @@ describe('hotelOffersWorkflow', () => {
     const fail = async (): Promise<SupplierHotel[]> => {
       throw new Error('HTTP 500');
     };
-    const err = await run({ fetchSupplierA: fail, fetchSupplierB: fail }).catch((e: unknown) => e);
+    const err = await run({ fetchSupplierA: fail, fetchSupplierB: fail, saveToRedis: saved }).catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(WorkflowFailedError);
     const cause = (err as WorkflowFailedError).cause;
     expect(cause).toBeInstanceOf(ApplicationFailure);
     expect((cause as ApplicationFailure).type).toBe('AllSuppliersFailed');
     expect((cause as ApplicationFailure).nonRetryable).toBe(true);
+  }, 60_000);
+
+  it('saveToRedis fails after 2 attempts → workflow still succeeds with cached: false', async () => {
+    let saveAttempts = 0;
+    const result = await run({
+      fetchSupplierA: async () => A,
+      fetchSupplierB: async () => B,
+      saveToRedis: async () => {
+        saveAttempts += 1;
+        throw new Error('Redis down');
+      },
+    });
+    expect(saveAttempts).toBe(2);
+    expect(result.cached).toBe(false);
+    expect(result.offers).toHaveLength(3);
+  }, 60_000);
+
+  it('empty offers → saveToRedis is not called, cached: false', async () => {
+    let saveCalls = 0;
+    const result = await run({
+      fetchSupplierA: async () => [],
+      fetchSupplierB: async () => [],
+      saveToRedis: async () => {
+        saveCalls += 1;
+      },
+    });
+    expect(saveCalls).toBe(0);
+    expect(result).toEqual({ offers: [], failedSuppliers: [], cached: false });
   }, 60_000);
 });

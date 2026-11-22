@@ -2,6 +2,8 @@ import type { LogLevel as TemporalLogLevel, LogMetadata, Logger as TemporalLogge
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { config } from '../config';
 import { createLogger, type Logger } from '../logger';
+import { closeWorkerRedis, getWorkerRedis } from '../redis/client';
+import { createHotelRepository } from '../redis/hotelRepository';
 import { createActivities } from './activities';
 
 const log = createLogger('worker');
@@ -35,14 +37,27 @@ export async function runWorker(): Promise<void> {
     telemetryOptions: { logging: { filter: { core: 'WARN', other: 'ERROR' }, forward: {} } },
   });
 
-  const connection = await NativeConnection.connect({ address: config.temporalAddress });
+  // Connect eagerly: with the offline queue disabled, a client created on the
+  // first saveToRedis call would fail that call while still connecting.
+  getWorkerRedis();
+
+  let connection: NativeConnection | undefined;
   try {
+    connection = await NativeConnection.connect({ address: config.temporalAddress });
     const worker = await Worker.create({
       connection,
       namespace: config.temporalNamespace,
       taskQueue: config.temporalTaskQueue,
       workflowsPath: require.resolve('./workflows'),
-      activities: createActivities({ supplierBaseUrl: config.supplierBaseUrl }),
+      activities: createActivities({
+        supplierBaseUrl: config.supplierBaseUrl,
+        hotelStore: createHotelRepository({
+          getClient: getWorkerRedis,
+          ttlSeconds: config.cacheTtlSeconds,
+          partialTtlSeconds: config.partialCacheTtlSeconds,
+          log,
+        }),
+      }),
       shutdownGraceTime: '10s',
     });
 
@@ -58,7 +73,10 @@ export async function runWorker(): Promise<void> {
     await worker.run();
     log.info('worker stopped');
   } finally {
-    await connection.close();
+    log.info('closing Redis client');
+    await closeWorkerRedis().catch((err: unknown) => log.error({ err }, 'error closing Redis client'));
+    log.info('Redis client closed');
+    await connection?.close();
   }
 }
 

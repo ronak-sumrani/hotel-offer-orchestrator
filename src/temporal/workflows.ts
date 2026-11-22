@@ -21,6 +21,16 @@ const { fetchSupplierA, fetchSupplierB } = proxyActivities<HotelActivities>({
   },
 });
 
+// Short policy: a cache write must not eat the 30s workflow budget
+// (worst case suppliers 16.5s + save 2×3s + 0.2s backoff ≈ 22.7s).
+const { saveToRedis } = proxyActivities<HotelActivities>({
+  startToCloseTimeout: '3s',
+  retry: {
+    maximumAttempts: 2,
+    initialInterval: '200ms',
+  },
+});
+
 function errorMessage(reason: unknown): string {
   if (reason instanceof Error) {
     // ActivityFailure wraps the real error in `cause`.
@@ -62,5 +72,20 @@ export async function hotelOffersWorkflow(input: HotelOffersInput): Promise<Hote
 
   const offers = selectBestOffers(offersA, offersB);
   log.info('hotel offers selected', { city, count: offers.length, failedSuppliers });
-  return { offers, failedSuppliers };
+
+  // Empty list is not cached (decision 4). A failed save does not fail the
+  // workflow: the API serves the live result (or 503 if a price filter was asked).
+  let cached = false;
+  if (offers.length > 0) {
+    try {
+      await saveToRedis(city, offers, failedSuppliers);
+      cached = true;
+    } catch (err) {
+      log.warn('saveToRedis failed after retries; returning uncached result', {
+        city,
+        error: errorMessage(err),
+      });
+    }
+  }
+  return { offers, failedSuppliers, cached };
 }

@@ -7,7 +7,8 @@
  */
 import { ApplicationFailure, Context } from '@temporalio/activity';
 import { z } from 'zod';
-import type { SupplierHotel, SupplierName } from '../domain/types';
+import type { BestOffer, SupplierHotel, SupplierName } from '../domain/types';
+import type { HotelStore } from '../redis/hotelRepository';
 
 export const INVALID_SUPPLIER_RESPONSE = 'InvalidSupplierResponse';
 
@@ -30,6 +31,8 @@ export interface ActivityDeps {
   fetchTimeoutMs?: number;
   /** Injectable for tests. Default: globalThis.fetch. */
   fetch?: typeof globalThis.fetch;
+  /** Where saveToRedis writes. */
+  hotelStore: HotelStore;
 }
 
 export function createActivities(deps: ActivityDeps) {
@@ -115,6 +118,28 @@ export function createActivities(deps: ActivityDeps) {
     },
     async fetchSupplierB(city: string): Promise<SupplierHotel[]> {
       return fetchSupplier('Supplier B', '/supplierB/hotels', city);
+    },
+    /** Retryable on any Redis failure (plain error); the workflow tolerates final failure. */
+    async saveToRedis(city: string, offers: BestOffer[], failedSuppliers: SupplierName[]): Promise<void> {
+      const ctx = Context.current();
+      const started = performance.now();
+      const meta = {
+        city,
+        attempt: ctx.info.attempt,
+        count: offers.length,
+        partial: failedSuppliers.length > 0,
+      };
+      try {
+        await deps.hotelStore.saveOffers(city, offers, failedSuppliers);
+      } catch (err) {
+        ctx.log.warn('saveToRedis failed', {
+          ...meta,
+          durationMs: Math.round(performance.now() - started),
+          error: (err as Error).message,
+        });
+        throw err;
+      }
+      ctx.log.info('saveToRedis succeeded', { ...meta, durationMs: Math.round(performance.now() - started) });
     },
   };
 }

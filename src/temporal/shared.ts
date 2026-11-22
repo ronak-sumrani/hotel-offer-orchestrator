@@ -19,4 +19,6 @@ export interface HotelOffersInput {
 export interface HotelOffersResult {
   offers: BestOffer[];
   failedSuppliers: SupplierName[];
+  /** True if the offers were saved to Redis. False when empty (not cached) or the save failed. */
+  cached: boolean;
 }

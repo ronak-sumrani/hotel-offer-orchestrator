@@ -2,7 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import type { BestOffer } from '../../domain/types';
+import { config } from '../../config';
 import { logger } from '../../logger';
+import { getApiRedis } from '../../redis/client';
+import {
+  CacheUnavailableError,
+  createHotelRepository,
+  type CachedOffers,
+  type HotelCache,
+} from '../../redis/hotelRepository';
 import {
   AllSuppliersFailedError,
   createTemporalRunner,
@@ -15,7 +23,11 @@ import { AppError } from '../errors';
 export interface HotelsRouterOptions {
   /** Runs the hotel-offers workflow. Default: real Temporal client. Tests inject a fake. */
   runHotelOffers: RunHotelOffers;
+  /** Redis-backed offer cache. Default: real Redis (lazy). Tests inject a fake. */
+  hotelCache: HotelCache;
 }
+
+type CacheStatus = 'HIT' | 'MISS' | 'BYPASS';
 
 const CITY_MAX_LENGTH = 64;
 
@@ -84,38 +96,103 @@ function toHttpError(err: unknown): unknown {
   return err;
 }
 
-/** GET /api/hotels?city=&minPrice=&maxPrice= */
+/** Default cache: Redis via the API's shared client, created on first request. */
+function defaultHotelCache(): HotelCache {
+  return createHotelRepository({
+    getClient: getApiRedis,
+    ttlSeconds: config.cacheTtlSeconds,
+    partialTtlSeconds: config.partialCacheTtlSeconds,
+  });
+}
+
+const cacheUnavailable = (): AppError =>
+  new AppError(503, 'CACHE_UNAVAILABLE', 'Price filtering is temporarily unavailable; try again later');
+
+/**
+ * GET /api/hotels?city=&minPrice=&maxPrice=
+ *
+ * Cache-aside, single read path: a hit is served from Redis; a miss runs the
+ * workflow (which saves to Redis) and then reads back from Redis, so price
+ * filtering always happens in Redis. If Redis is unusable, an unfiltered
+ * request falls back to the live workflow result (X-Cache: BYPASS) and a
+ * filtered one gets 503 CACHE_UNAVAILABLE.
+ */
 export function createHotelsRouter(options: Partial<HotelsRouterOptions> = {}): Router {
   const runHotelOffers = options.runHotelOffers ?? createTemporalRunner();
+  const cache = options.hotelCache ?? defaultHotelCache();
 
   const router = Router();
   router.get('/api/hotels', async (req, res) => {
-    // minPrice/maxPrice are validated now; filtering arrives with Redis (Phase 7).
-    const { city } = parseQuery(req.query);
+    const { city, minPrice, maxPrice } = parseQuery(req.query);
+    const hasFilter = minPrice !== undefined || maxPrice !== undefined;
     const workflowId = `hotel-offers-${city}-${randomUUID()}`;
-    const log = (res.locals.log ?? logger).child({ city, workflowId });
+    const log = (res.locals.log ?? logger).child({ city, minPrice, maxPrice });
     const started = performance.now();
+    const elapsed = (): number => Math.round(performance.now() - started);
 
+    const send = (cacheStatus: CacheStatus, offers: BestOffer[], failedSuppliers: readonly string[]): void => {
+      res.setHeader('X-Cache', cacheStatus);
+      if (failedSuppliers.length > 0) res.setHeader('X-Failed-Suppliers', failedSuppliers.join(','));
+      log.info(
+        { cache: cacheStatus, count: offers.length, failedSuppliers, durationMs: elapsed() },
+        'hotel search completed',
+      );
+      res.json(offers.map(toResponseItem));
+    };
+
+    /** Returns null on miss; undefined when Redis is unavailable. */
+    const readCache = async (stage: 'lookup' | 'read-back'): Promise<CachedOffers | null | undefined> => {
+      try {
+        return await cache.findByPriceRange(city, minPrice, maxPrice);
+      } catch (err) {
+        if (!(err instanceof CacheUnavailableError)) throw err;
+        log.warn({ err: err.message, stage }, 'cache unavailable');
+        return undefined;
+      }
+    };
+
+    // 1. Cache lookup.
+    const hit = await readCache('lookup');
+    if (hit) {
+      send('HIT', hit.offers, hit.failedSuppliers);
+      return;
+    }
+    // 2. Redis down and a filter was asked: the workflow cannot help.
+    if (hit === undefined && hasFilter) {
+      log.warn({ durationMs: elapsed() }, 'price filter requested while cache unavailable');
+      throw cacheUnavailable();
+    }
+
+    // 3. Miss: run the workflow (it saves to Redis).
     let result;
     try {
       result = await runHotelOffers({ city }, { workflowId });
     } catch (err) {
       const mapped = toHttpError(err);
       if (mapped instanceof AppError) {
-        log.warn({ err, code: mapped.code, durationMs: Math.round(performance.now() - started) }, 'hotel search failed');
+        log.warn({ err, workflowId, code: mapped.code, durationMs: elapsed() }, 'hotel search failed');
       }
       throw mapped;
     }
+    const { offers, failedSuppliers, cached } = result;
 
-    const { offers, failedSuppliers } = result;
-    if (failedSuppliers.length > 0) {
-      res.setHeader('X-Failed-Suppliers', failedSuppliers.join(','));
+    // 4. Empty: nothing cached, nothing to filter.
+    if (offers.length === 0) {
+      send('MISS', [], failedSuppliers);
+      return;
     }
-    log.info(
-      { count: offers.length, failedSuppliers, durationMs: Math.round(performance.now() - started) },
-      'hotel search completed',
-    );
-    res.json(offers.map(toResponseItem));
+
+    // 5. Read back from Redis so filtering happens there.
+    const fresh = cached ? await readCache('read-back') : undefined;
+    if (fresh) {
+      send('MISS', fresh.offers, fresh.failedSuppliers);
+      return;
+    }
+
+    // 6. Not cached, Redis down, or read-back miss.
+    log.warn({ workflowId, cached, readBack: fresh === null ? 'miss' : 'unavailable' }, 'serving without cache');
+    if (hasFilter) throw cacheUnavailable();
+    send('BYPASS', offers, failedSuppliers);
   });
   return router;
 }
