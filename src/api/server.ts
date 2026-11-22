@@ -4,20 +4,26 @@ import { config } from '../config';
 import { createLogger } from '../logger';
 import { errorHandler, notFoundHandler } from './errors';
 import { requestLogger } from './requestLogger';
+import { createSupplierRouter, type SupplierRouterOptions } from './routes/suppliers';
 
 const log = createLogger('api');
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
+export interface AppOptions {
+  /** Overrides for the mock supplier routes (tests use this to disable the delay). */
+  suppliers?: Partial<SupplierRouterOptions>;
+}
+
 /** Builds the Express app without listening (used directly by supertest). */
-export function createApp(): Express {
+export function createApp(options: AppOptions = {}): Express {
   const app = express();
   app.disable('x-powered-by');
 
   app.use(requestLogger(log));
   app.use(express.json());
 
-  // Business routes are registered in later phases.
+  app.use(createSupplierRouter(options.suppliers));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
